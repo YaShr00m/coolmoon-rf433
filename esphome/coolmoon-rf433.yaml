@@ -1,0 +1,298 @@
+# ESPHome config: ESP32 + CC1101 (433.92 MHz) acting as a Coolmoon RGB fan hub remote.
+# Tested with ESPHome 2026.9.1 (built-in `cc1101` component).
+#
+# 1. Copy secrets.yaml.example -> secrets.yaml and fill it in.
+# 2. Set `remote_address` below to YOUR remote's address (see README, "Learn your remote").
+# 3. esphome run coolmoon-rf433.yaml
+substitutions:
+  name: rf433-cc1101
+  # 16-bit address of the remote (first 16 bits of every code). Each remote has its own!
+  remote_address: "1100111110110111"
+
+esphome:
+  name: ${name}
+  friendly_name: Coolmoon RF
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Coolmoon RF Fallback"
+    password: !secret fallback_password
+
+captive_portal:
+
+# Wiring (CC1101 8-pin module -> ESP32 DevKit). VCC is 3.3 V ONLY.
+#   GND -> GND        VCC  -> 3V3
+#   SCK -> GPIO5      CSN  -> GPIO18   (swapped vs. the usual VSPI pins, that is how mine got soldered)
+#   MOSI-> GPIO23     MISO -> GPIO19
+#   GDO0-> GPIO4 (TX) GDO2 -> GPIO16 (RX)
+spi:
+  clk_pin: GPIO5
+  miso_pin: GPIO19
+  mosi_pin: GPIO23
+
+cc1101:
+  id: rf
+  cs_pin: GPIO18
+  frequency: 433.92MHz
+  # output_power: 10   # dBm, default 10 (= 10 mW, the legal LPD-433 limit in many countries)
+
+remote_receiver:
+  id: rx
+  pin: GPIO16
+  # Uncomment to learn your own remote: press buttons and read the log.
+  # dump:
+  #   - rc_switch
+  tolerance:
+    value: 50%
+    type: percentage
+  filter: 150us
+  idle: 6ms
+  buffer_size: 6kb
+
+remote_transmitter:
+  id: tx
+  pin: GPIO4
+  carrier_duty_percent: 100%
+  on_transmit:
+    then:
+      - cc1101.begin_tx: rf
+  on_complete:
+    then:
+      - cc1101.begin_rx: rf
+
+sensor:
+  - platform: wifi_signal
+    name: "WiFi signal"
+    update_interval: 60s
+
+# One button per remote key. Names MUST contain the 2-digit command number (fanctl looks for it).
+# Code = remote_address (16 bit) + command number (8 bit), RCSwitch protocol 1, pulse ~410 us.
+# The hub needs several repeats in a row, a single burst is ignored.
+button:
+  - platform: template
+    name: "Coolmoon 01 on"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00000001'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 02 auto"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00000010'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 03 off"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00000011'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 04 speed +"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00000100'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 05 mode +"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00000101'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 06 brightness +"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00000110'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 07 speed -"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00000111'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 08 mode -"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00001000'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 09 brightness -"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00001001'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 10 R"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00001010'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 11 G"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00001011'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 12 B"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00001100'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 13 green-yellow"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00001101'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 14 yellow"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00001110'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 15 orange"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00001111'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 16 orange 2"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00010000'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 17 blue"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00010001'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 18 lilac"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00010010'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 19 violet"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00010011'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 20 green"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00010100'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s
+  - platform: template
+    name: "Coolmoon 21 white"
+    on_press:
+      - remote_transmitter.transmit_rc_switch_raw:
+          code: '${remote_address}00010101'
+          protocol:
+            pulse_length: 410
+          repeat:
+            times: 10
+            wait_time: 0s

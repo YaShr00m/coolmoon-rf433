@@ -1,0 +1,12 @@
+[Unit]
+Description=Coolmoon case fans: quiet temperature-based control via ESP32 RF433
+After=network-online.target
+
+[Service]
+EnvironmentFile=%h/.config/fanctl.env
+ExecStart=%h/.local/share/fanctl/.venv/bin/python %h/.local/share/fanctl/fanctl.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

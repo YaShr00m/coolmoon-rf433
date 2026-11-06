@@ -1,0 +1,23 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "yaShr00m"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Coolmoon RF case fans: speed, temperatures, thresholds, presets, lighting",
+        "Icon": "temperature-normal",
+        "Id": "org.ishr00m.fanctl",
+        "License": "MIT",
+        "Name": "Case Fans",
+        "Version": "1.0",
+        "Name[ru]": "Вентиляторы",
+        "Description[ru]": "Корпусные вентиляторы Coolmoon: ступень, температуры, пороги, пресеты, подсветка",
+        "Website": "https://github.com/yaShr00m/coolmoon-rf433"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-NotificationArea": "true",
+    "X-Plasma-NotificationAreaCategory": "Hardware"
+}
