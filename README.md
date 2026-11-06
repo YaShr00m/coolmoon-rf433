@@ -57,6 +57,11 @@ Hub behaviour worth knowing:
 
 ## Hardware
 
+<p align="center"><img src="docs/hardware.jpg" alt="Coolmoon RGB fan controller and its 21-key RF remote" width="420"></p>
+
+Tested with this one: **Coolmoon "Controller of Rainbow RGB Fan"** (up to 10 fans + 2 LED strips,
+Molex power) and its 21-key 433 MHz remote.
+
 - ESP32 DevKit (any ESP32 with ESPHome support)
 - CC1101 433 MHz module, 8-pin (2×4 header) — **3.3 V only**
 - The Coolmoon hub and its fans, of course
@@ -176,6 +181,9 @@ ESP32 + CC1101 на ESPHome изображает пульт, служба на L
 **Особенности хаба:** 4 скорости — 0 (стоп), 1, 2, 3; есть только относительные «+»/«−»; на краях
 скорость упирается и не переходит по кругу (4 × «−» всегда даёт 0 — так служба пересинхронизируется);
 в состоянии `off` хаб не слушает команды скорости; `auto` — это перебор эффектов подсветки.
+
+**Проверено на** контроллере Coolmoon «Controller of Rainbow RGB Fan» (до 10 вентиляторов и 2 ленты,
+питание Molex) с пультом на 21 кнопку — фото в разделе [Hardware](#hardware).
 
 **Подключение CC1101** (8 контактов, только 3,3 В!) — таблица в разделе [Hardware](#hardware).
 Если в логе `Chip ID: 0x0000` — ошибка в проводах (чаще всего перепутаны SCK/CSN или MISO/MOSI),
