@@ -73,6 +73,20 @@ PlasmoidItem {
         xhr.setRequestHeader("Content-Type", "application/json");
         xhr.send(JSON.stringify({ name: name }));
     }
+    function gpuRgb(mode, color) {
+        var g = root.st && root.st.cfg && root.st.cfg.gpu_rgb;
+        if (color === undefined) color = (g && g.color) || "ff0000";
+        var xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return;
+            root.pressMsg = xhr.status === 200 ? tx("✓ sent", "✓ отправлено") : tx("✗ error", "✗ ошибка");
+            pressMsgTimer.restart();
+            refresh();
+        };
+        xhr.open("POST", root.api + "/gpu");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify({mode: mode, color: color}));
+    }
     Timer { id: pressMsgTimer; interval: 2000; onTriggered: root.pressMsg = "" }
     function deg(v) { return v === null || v === undefined ? "—" : Math.round(v) + "°"; }
     function dur(sec) {
@@ -278,6 +292,13 @@ PlasmoidItem {
                     onClicked: root.press("mode +")
                     PlasmaComponents.ToolTip { text: root.tx("Next lighting mode", "Следующий режим подсветки") }
                 }
+                PlasmaComponents.Button {
+                    readonly property bool lightOn: !(root.st && root.st.cfg && root.st.cfg.light === false)
+                    icon.name: lightOn ? "system-shutdown" : "help-hint"
+                    text: lightOn ? root.tx("Off", "Выкл") : root.tx("On", "Вкл")
+                    onClicked: root.press(lightOn ? "off" : "on")
+                    PlasmaComponents.ToolTip { text: root.tx("Turn lighting off/on (fans keep running)", "Выключить/включить подсветку (вентиляторы продолжают работать)") }
+                }
                 Item { Layout.preferredWidth: Kirigami.Units.smallSpacing }
                 Repeater {
                     model: [["R", "#e53935", root.tx("Red", "Красный")], ["G", "#43a047", root.tx("Green", "Зелёный")],
@@ -306,6 +327,51 @@ PlasmoidItem {
                     font: Kirigami.Theme.smallFont
                     color: root.pressMsg.startsWith("✓") ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.negativeTextColor
                     elide: Text.ElideRight
+                }
+            }
+
+            // ── graphics card RGB (OpenRGB) ──
+            RowLayout {
+                visible: root.online && root.st !== null
+                spacing: Kirigami.Units.smallSpacing
+                readonly property var g: (root.st && root.st.cfg && root.st.cfg.gpu_rgb) || ({mode: "", color: ""})
+                PlasmaComponents.Label { text: root.tx("GPU:", "Видеокарта:"); opacity: 0.7 }
+                PlasmaComponents.ComboBox {
+                    id: gpuMode
+                    readonly property var modes: [["Direct", root.tx("Static", "Статичный")], ["Breathing", root.tx("Breathing", "Дыхание")],
+                        ["Flashing", root.tx("Flashing", "Мигание")], ["Rainbow", root.tx("Rainbow", "Радуга")],
+                        ["Flowing", root.tx("Flowing", "Перелив")], ["Wave", root.tx("Wave", "Волна")],
+                        ["Meteor", root.tx("Meteor", "Метеор")], ["Rhythm", root.tx("Rhythm", "Ритм")], ["Off", root.tx("Off", "Выкл")]]
+                    model: modes.map(m => m[1])
+                    currentIndex: Math.max(0, modes.findIndex(m => m[0] === parent.g.mode))
+                    onActivated: (i) => root.gpuRgb(modes[i][0])
+                }
+                Repeater {
+                    model: [["ff0000", root.tx("Red", "Красный")], ["00ff00", root.tx("Green", "Зелёный")],
+                            ["0000ff", root.tx("Blue", "Синий")], ["ff8000", root.tx("Orange", "Оранжевый")],
+                            ["8000ff", root.tx("Purple", "Фиолетовый")], ["00ffff", root.tx("Cyan", "Голубой")],
+                            ["ffffff", root.tx("White", "Белый")]]
+                    delegate: Rectangle {
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 1.2
+                        Layout.preferredHeight: Kirigami.Units.gridUnit * 1.2
+                        radius: width / 2
+                        color: "#" + modelData[0]
+                        border.width: gdot.containsMouse ? 2 : 1
+                        border.color: gdot.containsMouse ? Kirigami.Theme.highlightColor : Qt.rgba(0.5, 0.5, 0.5, 0.6)
+                        scale: gdot.pressed ? 0.85 : 1
+                        MouseArea {
+                            id: gdot
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            // a colour click switches colourless modes (rainbow, off…) to static
+                            onClicked: {
+                                var m = gpuMode.modes[gpuMode.currentIndex][0];
+                                root.gpuRgb(["Direct", "Breathing", "Flashing", "Meteor"].indexOf(m) >= 0 ? m : "Direct", modelData[0]);
+                            }
+                        }
+                        PlasmaCore.ToolTipArea { anchors.fill: parent; mainText: modelData[1] }
+                    }
                 }
             }
 

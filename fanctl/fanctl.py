@@ -16,7 +16,11 @@ Local HTTP API for the KDE widget: http://127.0.0.1:8766
   GET  /state   current state, thresholds, stats, history
   POST /config  {"mode":"auto"|"manual","manual_level":0..3,"preset":"quiet|balance|cool|custom",
                  "thresholds":{"gpu":[a,b,c],"cpu":[..],"nvme":[..]},"gpu_fan_rule":bool}
-  POST /press   {"name":"mode +"|"mode -"|"R"|"G"|"B"|"white"}  — lighting buttons
+  POST /press   {"name":"mode +"|"mode -"|"R"|"G"|"B"|"white"|"on"|"off"}  — lighting buttons
+                "off" turns the hub's lights off; the hub then ignores speed commands, so every
+                speed change is wrapped in on .. off while cfg.light is false.
+  POST /gpu     {"mode":"Off"|"Direct"|"Breathing"|"Rainbow"|"Flowing"|..., "color":"RRGGBB"}
+                — graphics card RGB through the OpenRGB CLI (re-applied at service start)
 Settings are stored in ~/.config/fanctl.json.
 """
 import asyncio, collections, glob, json, logging, os, re, subprocess, time
@@ -30,8 +34,8 @@ HTTP_PORT = 8766
 # Coolmoon command numbers (= button order on the remote, low byte of the 24-bit code)
 CMD = {"on": 1, "auto": 2, "off": 3, "speed +": 4, "mode +": 5, "brightness +": 6, "speed -": 7,
        "mode -": 8, "brightness -": 9, "R": 10, "G": 11, "B": 12, "white": 21}
-# Buttons the widget may press. "off" is excluded: when the hub is off it ignores speed commands.
-LIGHT_BUTTONS = {"mode +", "mode -", "R", "G", "B", "white"}
+# Buttons the widget may press. "on"/"off" are handled specially (cfg.light), see Controller.light().
+LIGHT_BUTTONS = {"mode +", "mode -", "R", "G", "B", "white", "on", "off"}
 IDEMPOTENT = {"R", "G", "B", "white"}   # safe to send twice in case one burst is lost
 
 # Temperature (°C) at which speed 1, 2, 3 kicks in, per sensor
@@ -41,7 +45,10 @@ PRESETS = {
     "cool":    {"gpu": [48, 58, 68], "cpu": [58, 68, 78], "nvme": [50, 60, 68]},
 }
 DEFAULT_CFG = {"mode": "auto", "manual_level": 1, "preset": "balance",
-               "thresholds": PRESETS["balance"], "gpu_fan_rule": True}
+               "thresholds": PRESETS["balance"], "gpu_fan_rule": True, "light": True,
+               "gpu_rgb": None}   # {"mode": .., "color": ..} last applied to the graphics card
+GPU_MODES = {"Off", "Direct", "Breathing", "Flashing", "Rainbow", "Flowing", "Wave", "Meteor", "Rhythm"}
+COLOR_MODES = {"Direct", "Breathing", "Flashing", "Meteor"}
 
 HYST = 6             # step down only when temperature is HYST below the threshold
 DOWN_HOLD = 30       # ... and stays there this many seconds
@@ -108,7 +115,7 @@ def level_for(t, ups, cur):
 
 class Hub:
     def __init__(self):
-        self.c = None; self.keys = {}; self.level = None; self.lock = asyncio.Lock()
+        self.c = None; self.keys = {}; self.level = None; self.lock = asyncio.Lock(); self.awake = False
 
     async def connect(self):
         c = APIClient(HOST, 6053, None, noise_psk=KEY)
@@ -143,11 +150,14 @@ class Hub:
 
     async def home(self, target):
         await self.press("on")
+        self.awake = True
         await self.press("speed -", 4)
         await self.press("speed +", target)
         self.level = target
 
     async def set(self, target):
+        if not self.awake:   # hub is "off" (lights off): it ignores speed until "on"
+            await self.press("on"); self.awake = True
         if self.level is None:
             return await self.home(target)
         d = target - self.level
@@ -177,6 +187,7 @@ class Controller:
         self.samples = {k: collections.deque(maxlen=SMOOTH) for k in ("cpu", "gpu", "nvme")}
         self.changed_at = 0.0
         self.fresh = False
+        self.gpu_lock = asyncio.Lock()
 
     def state(self):
         return {"level": self.hub.level, "target": self.want, "esp": self.esp_ok and self.hub.c is not None,
@@ -189,7 +200,7 @@ class Controller:
         cfg = self.cfg
         if (new.get("mode") == "auto" and cfg["mode"] != "auto") or "preset" in new or "thresholds" in new:
             self.fresh = True   # mode or thresholds changed — re-evaluate right away, no hysteresis
-        for k in ("mode", "manual_level", "preset", "gpu_fan_rule"):
+        for k in ("mode", "manual_level", "preset", "gpu_fan_rule", "light"):
             if k in new: cfg[k] = new[k]
         if "thresholds" in new:
             cfg["thresholds"] = new["thresholds"]; cfg["preset"] = "custom"
@@ -221,7 +232,9 @@ class Controller:
         cand = {"cpu": level_for(c, th["cpu"], cur)}
         if g is not None: cand["gpu"] = level_for(g, th["gpu"], cur)
         if n is not None: cand["nvme"] = level_for(n, th["nvme"], cur)
-        if cfg["gpu_fan_rule"] and gfan and g is not None and g >= GPU_FAN_MIN_T:
+        # with hysteresis, like the thresholds: once on, hold speed 1 until GPU drops HYST below
+        gpu_fan_min = GPU_FAN_MIN_T - (HYST if cur >= 1 else 0)
+        if cfg["gpu_fan_rule"] and gfan and g is not None and g >= gpu_fan_min:
             cand["gpu_fan"] = 1
         src, new = max(cand.items(), key=lambda kv: kv[1])
         if self.fresh:
@@ -286,6 +299,8 @@ class Controller:
                     await self.hub.press("on"); await self.hub.set(self.want); last_edge = now
                 elif self.want in (1, 2) and now - last_mid > RESYNC_MID:
                     await self.hub.home(self.want); last_mid = now
+                if not self.cfg.get("light", True) and self.hub.awake:
+                    await self.hub.press("off"); self.hub.awake = False
             except Exception as e:
                 log.warning(f"error: {e!r}, reconnecting")
                 self.esp_ok = False
@@ -300,6 +315,35 @@ class Controller:
                 await asyncio.wait_for(self.wake.wait(), POLL)
             except asyncio.TimeoutError:
                 pass
+
+    async def light(self, name):
+        try:
+            if name in ("on", "off"):
+                self.cfg["light"] = name == "on"; save_cfg(self.cfg)
+                await self.hub.press(name, 2)
+                self.hub.awake = name == "on"
+                log.info(f"lights {name}")
+            else:
+                if not self.cfg.get("light", True):   # a colour/mode press means "lights on"
+                    self.cfg["light"] = True; save_cfg(self.cfg)
+                    await self.hub.press("on"); self.hub.awake = True
+                await self.hub.press(name, 2 if name in IDEMPOTENT else 1)
+        except Exception as e:
+            log.warning(f"press {name}: {e!r}")
+
+    async def gpu_rgb(self, mode, color):
+        # MSI cards ignore OpenRGB's "Off" mode — black static colour turns the LEDs off instead
+        if mode == "Off":
+            cmd = ["openrgb", "--noautoconnect", "-d", "0", "-m", "Direct", "-c", "000000"]
+        else:
+            cmd = ["openrgb", "--noautoconnect", "-d", "0", "-m", mode]
+            if mode in COLOR_MODES and color: cmd += ["-c", color]
+        async with self.gpu_lock:
+            p = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL,
+                                                     stderr=asyncio.subprocess.PIPE)
+            _, err = await asyncio.wait_for(p.communicate(), 60)
+        if p.returncode: log.warning(f"openrgb {mode}: rc={p.returncode} {err.decode()[-200:]}")
+        else: log.info(f"GPU RGB {mode} {color or ''}")
 
     async def http(self, reader, writer):
         try:
@@ -320,8 +364,16 @@ class Controller:
                 elif name not in LIGHT_BUTTONS or name not in self.hub.keys:
                     code, out = 400, {"error": "unknown button"}
                 else:
-                    asyncio.create_task(self.hub.press(name, 2 if name in IDEMPOTENT else 1))
+                    asyncio.create_task(self.light(name))
                     out = {"ok": True}
+            elif method == "POST" and path.startswith("/gpu"):
+                b = json.loads(body or b"{}")
+                mode, color = b.get("mode", ""), str(b.get("color", "")).lstrip("#")
+                if mode not in GPU_MODES or (color and not re.fullmatch(r"[0-9a-fA-F]{6}", color)):
+                    code, out = 400, {"error": "bad mode/color"}
+                else:
+                    self.cfg["gpu_rgb"] = {"mode": mode, "color": color}; save_cfg(self.cfg)
+                    asyncio.create_task(self.gpu_rgb(mode, color)); out = {"ok": True}
             elif method == "OPTIONS":
                 out = {}
             else:
@@ -341,6 +393,8 @@ async def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     ctl = Controller()
     await asyncio.start_server(ctl.http, "127.0.0.1", HTTP_PORT)
+    g = ctl.cfg.get("gpu_rgb")
+    if g: asyncio.create_task(ctl.gpu_rgb(g["mode"], g.get("color", "")))
     await ctl.run()
 
 asyncio.run(main())

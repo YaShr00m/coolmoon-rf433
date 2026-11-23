@@ -145,12 +145,20 @@ loginctl enable-linger "$USER"     # optional: run without logging in
 journalctl --user -u fanctl -f
 ```
 
-Local API on `127.0.0.1:8766`: `GET /state`, `POST /config`, `POST /press` (lighting keys).
+Local API on `127.0.0.1:8766`: `GET /state`, `POST /config`, `POST /press` (lighting keys, incl. `on`/`off`),
+`POST /gpu` (graphics card RGB).
+
+- **Lights off:** `off` turns the hub's lighting off, but in that state the hub ignores speed keys.
+  So while lights are off, fanctl wraps every speed change in `on` … `off`. The choice survives restarts.
+- **Graphics card RGB (optional):** set through the [OpenRGB](https://openrgb.org) CLI
+  (`sudo apt install openrgb`, user in group `i2c`). Tested on MSI RTX 3060 Gaming X Trio LHR.
+  MSI cards ignore OpenRGB's `Off` mode, so "Off" is sent as static black. The last mode is
+  re-applied when the service starts.
 
 ## KDE widget
 
 Plasma 6. Shows the current speed (the fan icon spins faster at higher speeds), temperatures,
-mode (Auto / 0–3), lighting (mode ◀ ▶, R/G/B/white), preset & thresholds, time per speed today
+mode (Auto / 0–3), lighting (on/off, mode ◀ ▶, R/G/B/white), graphics card RGB (mode + colour), preset & thresholds, time per speed today
 and a 30-minute chart.
 
 ```sh
@@ -194,11 +202,13 @@ ESP32 + CC1101 на ESPHome изображает пульт, служба на L
 через 30 с на 6 °C ниже порога и не раньше чем через 30 с после прошлого переключения, чтобы обороты
 не дёргались. Пока крутится кулер видеокарты (и она ≥ 50 °C), корпусные не ниже 1-й ступени (можно
 выключить). Ручной режим 0–3 — без защиты от перегрева. Нет данных с датчиков — ступень 3.
-Потеря связи с ESP32 видна в виджете, служба переподключается сама. Установка — см.
+Потеря связи с ESP32 видна в виджете, служба переподключается сама. Подсветку хаба можно выключить:
+пока она выключена, служба перед сменой скорости шлёт `on`, а после — снова `off`. Подсветка
+видеокарты (если есть OpenRGB) — через `POST /gpu`; у MSI «Выкл» = статичный чёрный. Установка — см.
 [fanctl — the service](#fanctl--the-service).
 
 **Виджет KDE** (Plasma 6, язык по системе — русский или английский): текущая ступень, температуры,
-режим, подсветка, пресеты и пороги, время на каждой ступени за день и график за 30 минут.
+режим, подсветка (вкл/выкл, режим, цвет), подсветка видеокарты, пресеты и пороги, время на каждой ступени за день и график за 30 минут.
 Установка — см. [KDE widget](#kde-widget).
 
 ## License
